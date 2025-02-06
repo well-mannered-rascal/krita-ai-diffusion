@@ -625,15 +625,11 @@ def _find_control_models(model_list: Sequence[str]):
     kind = ResourceKind.controlnet
     models = {}
     
-    print("\nControlNet Model Discovery:")
-    print("Input model_list:", model_list)
-    
     # Add explicitly mapped models first
     for mode, ver in product(ControlMode, Arch.list()):
         if mode.is_control_net:
             resid = resource_id(kind, ver, mode)
             if model := _find_model(model_list, kind, ver, mode):
-                print(f"Found mapped model - ResID: {resid}, Model: {model}")
                 models[resid] = model
     
     # Add any remaining .safetensors or .pth files in the controlnet folder
@@ -642,10 +638,8 @@ def _find_control_models(model_list: Sequence[str]):
             if model_path not in models.values():
                 # Create a generic resource ID for unmapped models
                 resid = resource_id(kind, Arch.all, model_path)
-                print(f"Found unmapped model - ResID: {resid}, Model: {model_path}")
                 models[resid] = model_path
     
-    print("\nFinal models dict:", models)
     return models
 
 
