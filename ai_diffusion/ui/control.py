@@ -4,6 +4,7 @@ from PyQt5.QtGui import QResizeEvent
 from PyQt5.QtWidgets import QWidget, QLabel, QSlider, QToolButton, QCheckBox
 from PyQt5.QtWidgets import QComboBox, QHBoxLayout, QVBoxLayout, QGridLayout, QFrame
 from PyQt5.QtCore import Qt, QMetaObject, pyqtSignal
+import os
 
 from ..resources import ControlMode
 from ..properties import Binding, bind, bind_combo, bind_toggle
@@ -195,6 +196,11 @@ class ControlWidget(QWidget):
             self._model.style_changed.connect(self._update_available_models),
         ]
 
+        self.show_all_models = QCheckBox("Show All Models")
+        self.show_all_models.setToolTip("Show all available models instead of only those matching the current preprocessor")
+        self.show_all_models.stateChanged.connect(self._update_available_models)
+        bar_layout.addWidget(self.show_all_models)
+
     def disconnect_all(self):
         Binding.disconnect_all(self._connections)
 
@@ -314,12 +320,18 @@ class ControlWidget(QWidget):
                     if lora_model:
                         self.model_select.addItem(f"LoRA: {lora_model}", ("lora", lora_model))
                     
-                    # Add any unmapped models
+                    # Add unmapped models
+                    show_all = self.show_all_models.isChecked()
+                    search_term = self._control.mode.name.lower().replace('_', '')
+                    
                     for resid, model_path in models._models.resources.items():
                         if (isinstance(resid, str) and 
                             model_path and 
                             model_path not in [cn_models, universal, lora_model]):
-                            self.model_select.addItem(model_path, ("controlnet", model_path))
+                            
+                            model_name = os.path.splitext(os.path.basename(model_path))[0].lower()
+                            if show_all or search_term in model_name.replace('_', ''):
+                                self.model_select.addItem(model_path, ("controlnet", model_path))
                 
                 elif self._control.mode.is_ip_adapter:
                     # Get IP-Adapter model
