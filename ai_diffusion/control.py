@@ -30,6 +30,7 @@ class ControlLayer(QObject, ObservableProperties):
     can_generate = Property(True)
     has_active_job = Property(False)
     error_text = Property("")
+    selected_model = Property("", persist=True)
 
     mode_changed = pyqtSignal(ControlMode)
     layer_id_changed = pyqtSignal(QUuid)
@@ -43,6 +44,7 @@ class ControlLayer(QObject, ObservableProperties):
     can_generate_changed = pyqtSignal(bool)
     has_active_job_changed = pyqtSignal(bool)
     error_text_changed = pyqtSignal(str)
+    selected_model_changed = pyqtSignal(str)
     modified = pyqtSignal(QObject, str)
 
     def __init__(self, model: model.Model, mode: ControlMode, layer_id: QUuid, index: int):
@@ -72,6 +74,7 @@ class ControlLayer(QObject, ObservableProperties):
         if mode != self.mode:
             self._mode = mode
             self.mode_changed.emit(mode)
+            self._update_is_supported()
             self._update_is_pose_vector()
             if not self.use_custom_strength:
                 self._set_values_from_preset()
@@ -114,7 +117,13 @@ class ControlLayer(QObject, ObservableProperties):
         if self.mode.is_lines or self.mode is ControlMode.stencil:
             image.make_opaque(background=Qt.GlobalColor.white)
         strength = self.strength / self.strength_multiplier
-        return ControlInput(self.mode, image, strength, (self.start, self.end))
+        
+        return ControlInput(
+            self.mode, 
+            image, 
+            strength, 
+            (self.start, self.end)
+        )
 
     def generate(self):
         self._generate_job = self._model.generate_control_layer(self)

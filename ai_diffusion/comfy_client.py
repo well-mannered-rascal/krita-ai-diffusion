@@ -8,6 +8,7 @@ from enum import Enum
 from collections import deque
 from itertools import chain, product
 from typing import Any, Optional, Sequence
+import os
 
 from .api import WorkflowInput
 from .client import Client, CheckpointInfo, ClientMessage, ClientEvent, DeviceInfo, ClientModels
@@ -27,8 +28,6 @@ from .workflow import create as create_workflow
 from . import resources, util
 
 if util.is_macos:
-    import os
-
     if "SSL_CERT_FILE" not in os.environ:
         os.environ["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"
 
@@ -624,11 +623,30 @@ def _find_text_encoder_models(model_list: Sequence[str]):
 
 def _find_control_models(model_list: Sequence[str]):
     kind = ResourceKind.controlnet
-    return {
-        resource_id(kind, ver, mode): _find_model(model_list, kind, ver, mode)
-        for mode, ver in product(ControlMode, Arch.list())
-        if mode.is_control_net
-    }
+    models = {}
+    
+    print("\nControlNet Model Discovery:")
+    print("Input model_list:", model_list)
+    
+    # Add explicitly mapped models first
+    for mode, ver in product(ControlMode, Arch.list()):
+        if mode.is_control_net:
+            resid = resource_id(kind, ver, mode)
+            if model := _find_model(model_list, kind, ver, mode):
+                print(f"Found mapped model - ResID: {resid}, Model: {model}")
+                models[resid] = model
+    
+    # Add any remaining .safetensors or .pth files in the controlnet folder
+    for model_path in model_list:
+        if any(model_path.endswith(ext) for ext in ['.safetensors', '.pth']):
+            if model_path not in models.values():
+                # Create a generic resource ID for unmapped models
+                resid = resource_id(kind, Arch.all, model_path)
+                print(f"Found unmapped model - ResID: {resid}, Model: {model_path}")
+                models[resid] = model_path
+    
+    print("\nFinal models dict:", models)
+    return models
 
 
 def _find_ip_adapters(model_list: Sequence[str]):

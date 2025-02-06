@@ -1,8 +1,9 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any, Generator, Iterable, NamedTuple
+from typing import Any, Generator, Iterable, NamedTuple, Optional
 from PyQt5.QtCore import QObject, pyqtSignal
+import os
 
 from .api import WorkflowInput
 from .image import ImageCollection
@@ -184,10 +185,34 @@ class ModelDict:
         if key in [ControlMode.style, ControlMode.composition] and is_sd:
             key = ControlMode.reference
 
+        # Try to find exact match first
         result = self._models.find(ResourceId(self.kind, self.arch, key))
+        
+        # For ControlNet, also check all available models
+        if result is None and self.kind == ResourceKind.controlnet:
+            key_str = key.name if isinstance(key, ControlMode) else str(key)
+            search_term = key_str.replace('_', '').lower()
+            
+            # Check all models in resources
+            for resid_key, model_path in self._models.resources.items():
+                if model_path:
+                    # For ResourceId objects, check arch and kind
+                    if isinstance(resid_key, ResourceId):
+                        if resid_key.kind != self.kind:
+                            continue
+                        if resid_key.arch != self.arch and resid_key.arch != Arch.all:
+                            continue
+                    
+                    # For both string and ResourceId keys, check if model name matches search term
+                    model_name = os.path.splitext(os.path.basename(model_path))[0].lower()
+                    if search_term in model_name.replace('_', ''):
+                        result = model_path
+                        break
+        
         # Fallback to universal model if not found
         if result is None and allow_universal and isinstance(key, ControlMode):
             result = self.find(ControlMode.universal)
+        
         return result
 
     def for_version(self, arch: Arch):
@@ -249,6 +274,21 @@ class ModelDict:
             if self._models.find(ResourceId(ResourceKind.text_encoder, self.arch, te)) is None:
                 return False
         return True
+
+    def find_all(self, key: ControlMode | UpscalerName | str, allow_universal=False) -> list[str]:
+        # Get the primary model
+        primary = self.find(key, allow_universal)
+        results = []
+        if primary:
+            results.append(primary)
+            
+        # For ControlNet, also check universal model if allowed
+        if allow_universal and isinstance(key, ControlMode) and key != ControlMode.universal:
+            universal = self.find(ControlMode.universal)
+            if universal and universal != primary:
+                results.append(universal)
+                
+        return results
 
 
 class TranslationPackage(NamedTuple):

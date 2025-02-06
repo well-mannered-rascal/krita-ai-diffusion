@@ -22,6 +22,7 @@ class ControlWidget(QWidget):
         super().__init__(parent)
         self._control_list = control_list
         self._control = control
+        self._model = control._model
         self._connections: list[QMetaObject.Connection | Binding] = []
 
         layout = QVBoxLayout(self)
@@ -33,6 +34,12 @@ class ControlWidget(QWidget):
         for mode in (m for m in ControlMode if not m.is_internal):
             icon = theme.icon(f"control-{mode.name}")
             self.mode_select.addItem(icon, mode.text, mode)
+
+        self.model_select = QComboBox(self)
+        self.model_select.setStyleSheet(theme.flat_combo_stylesheet)
+        self.model_select.setMinimumContentsLength(20)
+        self.model_select.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLength)
+        self.model_select.currentIndexChanged.connect(self._update_model)
 
         self.layer_select = QComboBox(self)
         self.layer_select.setMinimumContentsLength(20)
@@ -79,6 +86,7 @@ class ControlWidget(QWidget):
 
         bar_layout = QHBoxLayout()
         bar_layout.addWidget(self.mode_select)
+        bar_layout.addWidget(self.model_select)
         bar_layout.addWidget(self.layer_select, 3)
         bar_layout.addWidget(self.generate_tool_button)
         bar_layout.addWidget(self.add_pose_tool_button)
@@ -182,6 +190,9 @@ class ControlWidget(QWidget):
             control.can_generate_changed.connect(self._update_visibility),
             control.mode_changed.connect(self._update_visibility),
             control.is_pose_vector_changed.connect(self._update_pose_utils),
+            control.mode_changed.connect(self._update_available_models),
+            root.connection.state_changed.connect(self._update_available_models),
+            self._model.style_changed.connect(self._update_available_models),
         ]
 
     def disconnect_all(self):
@@ -280,6 +291,60 @@ class ControlWidget(QWidget):
             self.error_text.setToolTip(
                 _("Required model not found, searching for") + f": {parts[1][:-1]}"
             )
+
+    def _update_available_models(self):
+        if client := root.connection.client_if_connected:
+            models = client.models.for_arch(self._model.arch)
+            with SignalBlocker(self.model_select):
+                self.model_select.clear()
+                if self._control.mode.is_control_net:
+                    # Add available ControlNet models
+                    cn_models = models.control.find(self._control.mode, allow_universal=True)
+                    if cn_models:
+                        self.model_select.addItem(cn_models, ("controlnet", cn_models))
+                    
+                    # Add universal model if different
+                    if self._control.mode != ControlMode.universal:
+                        universal = models.control.find(ControlMode.universal)
+                        if universal and universal != cn_models:
+                            self.model_select.addItem(f"Universal: {universal}", ("controlnet", universal))
+                    
+                    # Add LoRA model if available
+                    lora_model = models.lora.find(self._control.mode)
+                    if lora_model:
+                        self.model_select.addItem(f"LoRA: {lora_model}", ("lora", lora_model))
+                    
+                    # Add any unmapped models
+                    for resid, model_path in models._models.resources.items():
+                        if (isinstance(resid, str) and 
+                            model_path and 
+                            model_path not in [cn_models, universal, lora_model]):
+                            self.model_select.addItem(model_path, ("controlnet", model_path))
+                
+                elif self._control.mode.is_ip_adapter:
+                    # Get IP-Adapter model
+                    ip_model = models.ip_adapter.find(self._control.mode)
+                    if ip_model:
+                        self.model_select.addItem(ip_model, ip_model)
+                
+                # Set visibility based on whether we found any models
+                self.model_select.setVisible(self.model_select.count() > 0)
+                
+                # Select the previously selected model if it exists
+                if self._control.selected_model:
+                    index = self.model_select.findData(("controlnet", self._control.selected_model))
+                    if index >= 0:
+                        self.model_select.setCurrentIndex(index)
+
+    def _update_model(self):
+        if self.model_select.currentIndex() >= 0:
+            model_data = self.model_select.currentData()
+            # Extract just the model path from the tuple
+            if isinstance(model_data, tuple):
+                _, model_path = model_data
+                self._control.selected_model = model_path
+            else:
+                self._control.selected_model = model_data
 
 
 def _create_generate_button(parent, style: Qt.ToolButtonStyle):
