@@ -147,8 +147,6 @@ class ControlWidget(QWidget):
         self.strength_slider.setOrientation(Qt.Orientation.Horizontal)
         self.strength_slider.setRange(0, 75)
         self.strength_slider.setValue(control.strength)
-        self.strength_slider.setSingleStep(1)
-        self.strength_slider.setPageStep(10)
         self.strength_label = QLabel("1.0", self.extended_widget)
 
         self.range_slider = IntervalSlider(
@@ -200,6 +198,9 @@ class ControlWidget(QWidget):
         self.show_all_models.setToolTip("Show all available models instead of only those matching the current preprocessor")
         self.show_all_models.stateChanged.connect(self._update_available_models)
         bar_layout.addWidget(self.show_all_models)
+
+        # Initialize model selection
+        self._update_available_models()
 
     def disconnect_all(self):
         Binding.disconnect_all(self._connections)
@@ -304,34 +305,31 @@ class ControlWidget(QWidget):
             with SignalBlocker(self.model_select):
                 self.model_select.clear()
                 if self._control.mode.is_control_net:
-                    # Add available ControlNet models
-                    cn_models = models.control.find(self._control.mode, allow_universal=True)
-                    if cn_models:
-                        self.model_select.addItem(cn_models, ("controlnet", cn_models))
+                    # Get controlnet-specific model list from client
+                    control_models = models.control
                     
-                    # Add universal model if different
+                    # Add primary model
+                    cn_model = control_models.find(self._control.mode, allow_universal=True)
+                    if cn_model:
+                        self.model_select.addItem(cn_model, ("controlnet", cn_model))
+                    
+                    # Add universal variant if different
                     if self._control.mode != ControlMode.universal:
-                        universal = models.control.find(ControlMode.universal)
-                        if universal and universal != cn_models:
+                        universal = control_models.find(ControlMode.universal)
+                        if universal and universal != cn_model:
                             self.model_select.addItem(f"Universal: {universal}", ("controlnet", universal))
                     
-                    # Add LoRA model if available
-                    lora_model = models.lora.find(self._control.mode)
-                    if lora_model:
-                        self.model_select.addItem(f"LoRA: {lora_model}", ("lora", lora_model))
-                    
-                    # Add unmapped models
+                    # Add other controlnet models filtered by mode
                     show_all = self.show_all_models.isChecked()
                     search_term = self._control.mode.name.lower().replace('_', '')
+
+                    # Get ALL controlnet models from the dedicated controlnet store
+                    all_controlnet = control_models.find_all(self._control.mode, allow_universal=False)
                     
-                    for resid, model_path in models._models.resources.items():
-                        if (isinstance(resid, str) and 
-                            model_path and 
-                            model_path not in [cn_models, universal, lora_model]):
-                            
-                            model_name = os.path.splitext(os.path.basename(model_path))[0].lower()
-                            if show_all or search_term in model_name.replace('_', ''):
-                                self.model_select.addItem(model_path, ("controlnet", model_path))
+                    for model_path in all_controlnet:
+                        model_name = os.path.splitext(os.path.basename(model_path))[0].lower()
+                        if show_all or search_term in model_name.replace('_', ''):
+                            self.model_select.addItem(model_path, ("controlnet", model_path))
                 
                 elif self._control.mode.is_ip_adapter:
                     # Get IP-Adapter model
@@ -339,14 +337,14 @@ class ControlWidget(QWidget):
                     if ip_model:
                         self.model_select.addItem(ip_model, ip_model)
                 
-                # Set visibility based on whether we found any models
-                self.model_select.setVisible(self.model_select.count() > 0)
+                # Set visibility and default selection
+                has_models = self.model_select.count() > 0
+                self.model_select.setVisible(has_models)
+                self.model_select.setEnabled(has_models)
                 
-                # Select the previously selected model if it exists
-                if self._control.selected_model:
-                    index = self.model_select.findData(("controlnet", self._control.selected_model))
-                    if index >= 0:
-                        self.model_select.setCurrentIndex(index)
+                if has_models and self.model_select.currentIndex() < 0:
+                    self.model_select.setCurrentIndex(0)
+                    self._update_model()
 
     def _update_model(self):
         if self.model_select.currentIndex() >= 0:
