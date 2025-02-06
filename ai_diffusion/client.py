@@ -276,18 +276,25 @@ class ModelDict:
         return True
 
     def find_all(self, key: ControlMode | UpscalerName | str, allow_universal=False) -> list[str]:
-        # Get the primary model
-        primary = self.find(key, allow_universal)
         results = []
-        if primary:
-            results.append(primary)
-            
-        # For ControlNet, also check universal model if allowed
+        search_id = ResourceId(self.kind, self.arch, key)
+        
+        # Find all matching resources
+        for resid_str, model_path in self._models.resources.items():
+            try:
+                resid = ResourceId.parse(resid_str)
+                if resid.kind == search_id.kind:
+                    if model_path and model_path not in results:
+                        results.append(model_path)
+            except:
+                continue
+        
+        # Add universal variant if allowed
         if allow_universal and isinstance(key, ControlMode) and key != ControlMode.universal:
             universal = self.find(ControlMode.universal)
-            if universal and universal != primary:
+            if universal and universal not in results:
                 results.append(universal)
-                
+        
         return results
 
 
